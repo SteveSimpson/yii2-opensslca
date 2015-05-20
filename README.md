@@ -25,7 +25,21 @@ to the require section of your `composer.json` file.
 Usage
 -----
 
-Once the extension is installed, simply use it in your code by  :
+Once the extension is installed, simply use it in your code by adding the following line to 
+the components section of your @app/config/web.php or console.php :
 
-```php
-<?= \ssimpson\opensslca\AutoloadExample::widget(); ?>```
+```
+'opensslca' => require(__DIR__ . '/opensslca.php'),
+```
+
+Then add the following detailed configuration : 
+
+```
+<?php
+// @app/config/opensslca.php
+return [
+    'class'    => 'ssimpson\opensslca\Opensslca',
+    'password' => 'secret',
+    'ca_dir'   => '@app/ca',
+];
+```
