@@ -1,0 +1,21 @@
+{
+    "name": "ssimpson/yii2-opensslca",
+    "description": "This extension provides an easy interface to implement your own CA in the Yii2 framework.",
+    "type": "yii2-extension",
+    "keywords": ["yii2","extension","openssl","certificate authority","ca"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Steve Simpson",
+            "email": "software@lcsas.us"
+        }
+    ],
+    "require": {
+        "yiisoft/yii2": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "ssimpson\\opensslca\\": ""
+        }
+    }
+}
