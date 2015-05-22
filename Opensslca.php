@@ -32,7 +32,14 @@ class Opensslca extends Component
      * The Base Subject for our Certificate Authority
      * @var string
      */
-    public $base_subj;
+    public $dn_base;
+
+    /**
+     * from config
+     * The Common Name of the Certificate Authority
+     * @var string
+     */
+    public $ca_cn;
 
 
     public $caKeyFile;
@@ -53,11 +60,6 @@ class Opensslca extends Component
             }
         }
 
-        $caKeyFile  = $this->ca_dir . "ca_key.pem";
-        $caCertFile = $this->ca_dir . "ca_cert.pem";
-
-        $sbject = $this->base_subj . "/CN=Root Certificate Authority";
-
         if (! $force && file_exists($caKeyFile)) {
             \Yii::error('CA Key Exists, force not set','opensslca');
             return false;
@@ -75,10 +77,25 @@ class Opensslca extends Component
             return false;
         }
 
-        if (!file_put_contents($this->serialFile, '1001', LOCK_EX)) {
+        if (! file_put_contents($this->serialFile, '1001', LOCK_EX)) {
             \Yii::error('Unable to write serial file.','opensslca');
             return false;
         }
+
+        $configargs = [
+            "digest_alg" => "sha512",
+            'x509_extensions' => 'v3_ca',
+        ];
+
+        $dn = ['commonName'=>$this->ca_cn ];
+
+        $csr = $this->createCertificatSigningRequest($dn, $pkey, $configargs);
+
+        // this is slightly different since this is a self-signed cert; cacert is null
+        // use a 10 year CA
+        $cacert = openssl_csr_sign($csr, null, $pkey, 3650, $configargs, '1001');
+
+        openssl_x509_export_to_file($cacert, $this->caCertFile);
 
         return true;
     }
@@ -97,27 +114,47 @@ class Opensslca extends Component
     }
 
 
-    public function signCertificate($csr)
+    public function signCertificate($csr, $days)
     {
-        openssl_csr_sign();
+        $pkey = openssl_pkey_get_private("file://".$this->caKeyFile,$this->password);
+
+        $configargs['config'] = $this->getSslConfig();
+
+        //openssl_csr_sign($csr, );
     }
 
 
-    public function createCertificatSigningRequest()
-    {
-
-        openssl_csr_export($csr, $out);
-    }
-
-
-    public function generatePrivateKey($configargs = null)
+    public function createCertificatSigningRequest($dn, $pkey, $configargs = null)
     {
         if (is_null($configargs)) {
             $configargs = [
             "digest_alg" => "sha512",
+            ];
+        }
+        $configargs['config'] = $this->getSslConfig();
+
+        $signDn = $this->dn_base;
+
+        foreach ($dn as $key=>$value){
+            $signDn[$key] = $value;
+        }
+
+        return openssl_csr_new($dn, $pkey, $configargs);
+    }
+
+
+    public function generatePrivateKey($configargsIn = [])
+    {
+
+        $configargs = [
+            "digest_alg" => "sha512",
             "private_key_bits" => 2048,
             "private_key_type" => OPENSSL_KEYTYPE_RSA,
-            ];
+            'config' => $this->getSslConfig(),
+        ];
+
+        foreach ($configargsIn as $key=>$value) {
+            $configargs[$key] = $value;
         }
 
         return openssl_pkey_new($configargs);
@@ -150,5 +187,15 @@ class Opensslca extends Component
             $this->serialFile = $this->ca_dir . "ca_serial";
         }
         return $this->serialFile;
+    }
+
+    public function getSslConfig()
+    {
+        return dirname(__FILE__) . "/openssl.cnf";
+    }
+
+    public function getSerial()
+    {
+
     }
 }
