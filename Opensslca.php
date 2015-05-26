@@ -315,7 +315,7 @@ class Opensslca extends Component
     {
         if (
             (file_exists($file)) &&
-            ($cert = openssl_x509_read("file://".$this->getCaCertFile())) &&
+            ($cert = openssl_x509_read("file://".$file)) &&
             ($fields = openssl_x509_parse($cert))
         ) {
             return $fields['name'];
