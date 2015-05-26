@@ -309,4 +309,18 @@ class Opensslca extends Component
             return "CA has not been created.";
         }
     }
+
+
+    public function getCertSubject($file)
+    {
+        if (
+            (file_exists($file)) &&
+            ($cert = openssl_x509_read("file://".$this->getCaCertFile())) &&
+            ($fields = openssl_x509_parse($cert))
+        ) {
+            return $fields['name'];
+        } else {
+            return "*** unable to get subect from file ***";
+        }
+    }
 }
