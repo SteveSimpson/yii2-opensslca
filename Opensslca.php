@@ -297,4 +297,16 @@ class Opensslca extends Component
 
         return $this->caCert;
     }
+
+
+    public function getCaSubject()
+    {
+        if (file_exists($this->getCaCertFile())) {
+            $cert = $this->getCaCert();
+            $fields = openssl_x509_parse($cert);
+            return $fields['name'];
+        } else {
+            return "CA has not been created.";
+        }
+    }
 }
