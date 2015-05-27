@@ -12,6 +12,7 @@
     ],
     "require": {
         "yiisoft/yii2": "*"
+        "phpseclib/phpseclib": "*"
     },
     "autoload": {
         "psr-4": {
