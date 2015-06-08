@@ -6,11 +6,6 @@ use Yii;
 use yii\base\Component;
 use yii\validators\BooleanValidator;
 
-// PHP does not supply anything to do CRL's so we had to pull in phpseclib
-$vendorDir = dirname(dirname(dirname(__FILE__)));
-require($vendorDir . "/phpseclib/phpseclib/phpseclib/File/X509.php");
-require($vendorDir . "/phpseclib/phpseclib/phpseclib/Crypt/RSA.php");
-
 /**
  * This module should give you all the low level functions run a simple CA.
  *
@@ -72,8 +67,6 @@ class Opensslca extends Component
     public $caKey;
 
     public $caCert;
-
-    private $phpseclibPrivateKey;
 
     public static $crlStates = array('revoke'=>'Revoked', 'hold'=>'Hold');
 
@@ -168,13 +161,7 @@ class Opensslca extends Component
     }
 
     /**
-     * use OpenSSL here
-     *
-     * https://www.openssl.org/docs/apps/ca.html
-     * http://www.phildev.net/ssl/creating_ca.html
-     * https://jamielinux.com/docs/openssl-certificate-authority/sign-server-and-client-certificates.html
-     * http://pki-tutorial.readthedocs.org/en/latest/simple/#create-crl
-     * @param string $endDate
+     * @param int 
      */
     public function generateCertificateRevocationList($daysCrlValid=null)
     {
@@ -228,68 +215,8 @@ class Opensslca extends Component
             $return_value = proc_close($process);
         }
 
-        // view & verify CRL
-        //$command = "openssl crl -CAfile cacert.pem -in crl.pem -noout -text";
-        // convert from PEM to DER
-        //$command = "openssl crl -inform PEM -in crl.pem -outform DER -out crl.der";
-
         return "done";
     }
-
-    /**
-     * BROKEN ... really wish I could get this to work
-     * http://phpseclib.sourceforge.net/x509/crl.html
-     * https://github.com/phpseclib/phpseclib/issues/131
-     *
-     * @return Ambigous <Mixed, boolean, multitype:>
-     */
-    public function generateCertificateRevocationListUsingPhpSecLib()
-    {
-        $privKey= new \Crypt_RSA();
-        if ($this->password) {
-            $privKey->setPassword($this->password);
-        }
-        $keyFile = file_get_contents($this->getCaKeyFile());
-        $privKey->loadKey($keyFile);
-
-        $issuer = new \File_X509();
-        $caCertString = file_get_contents($this->getCaCertFile());
-
-        $issuer->loadX509($caCertString);
-
-        //print_r($issuer->getSubjectDN());
-
-        $issuer->setPrivateKey($privKey);
-
-        $this->loadCrlSource();
-
-        $crl = new \File_X509();
-        $crl->loadCA($caCertString);
-
-        $crl->loadCRL($crl->saveCRL($crl->signCRL($issuer, null)));
-
-        //phpseclib has this code commented out, but may use it in the future...
-        $crl->setSerialNumber($this->getNextCrlSerial());
-
-        $worker = new \File_X509();
-        $worker->loadCA($caCertString);
-
-        $crl->setEndDate('+ 30 days');
-        $worker->setEndDate('+ 30 days');
-
-        $foo = $crl->signatureSubject ;
-        foreach($this->crlSource as $id=>$value) {
-            $crl->revoke($id,$value['date']);
-
-        }
-
-        $result = $worker->signCRL($issuer, $crl); //, 'sha256WithRSAEncryption');
-
-        $text = $crl->saveCRL($result);
-
-        return $text;
-    }
-
 
     public function revokeCertificate($serialArray, $reason=0, $state='revoke', $date=null)
     {
@@ -664,15 +591,6 @@ class Opensslca extends Component
         }
         date_default_timezone_set($this->localTz);
         return true;
-
-
-        /*
-         * [ssimpson@claw openssl]$ cat -A index.txt
-        V^I160601184904Z^I^I1001^Iunknown^I/C=XX/O=Default Company Ltd/CN=CA$
-        R^I160601191053Z^I150602191418Z^I1002^Iunknown^I/C=XX/ST=Default Province/O=Default Company Ltd/CN=foo$
-        R^I160601191115Z^I150602191805Z,superseded^I1003^Iunknown^I/C=XX/ST=Default Province/O=Default Company Ltd/CN=bar$
-        */
-        date_default_timezone_set($this->localTz);
     }
 
 
