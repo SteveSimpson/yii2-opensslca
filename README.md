@@ -49,5 +49,7 @@ return [
 	               'organizationalUnitName' => 'Demo',
                 ],
     'ca_cn'     => 'Snake Oil CA',
+    'crlWhenRevoke' => true,
+    'crlValidDays'  => 30,
 ];
 ```

@@ -51,10 +51,10 @@ class Opensslca extends Component
 
     /**
      * from config
-     * Time for the CRL expiration. Should be relative
-     * @var string
+     * Days until the CRL should expire
+     * @var int
      */
-    public $crlExpiration;
+    public $crlValidDays;
 
     public $caKeyFile;
 
@@ -161,7 +161,7 @@ class Opensslca extends Component
     }
 
     /**
-     * @param int 
+     * @param int
      */
     public function generateCertificateRevocationList($daysCrlValid=null)
     {
@@ -176,7 +176,7 @@ class Opensslca extends Component
         );
 
         if (is_null($daysCrlValid) or inval($daysCrlValid) == 0) {
-            $daysCrlValid = 30;
+            $daysCrlValid = intval($this->crlValidDays);
         } else {
             $daysCrlValid = intval($daysCrlValid);
         }
@@ -195,16 +195,15 @@ class Opensslca extends Component
 
         $process = proc_open($command, $descriptorspec, $pipes, $cwd, $env);
         if (is_resource($process)) {
-            echo stream_get_contents($pipes[1]);
+            $foo = stream_get_contents($pipes[1]); // this will be a password promt
 
             $written = fwrite($pipes[0], $this->password);
 
-            echo stream_get_contents($pipes[1]);
+            \Yii::warning(stream_get_contents($pipes[1]), 'Opensslca');
 
             stream_set_blocking($pipes[2], 0);
             if ($err = stream_get_contents($pipes[2]))
             {
-                echo $err."\n";
                 \Yii::error('Process could not be started [' . $err . ']', 'Opensslca');
             }
 
