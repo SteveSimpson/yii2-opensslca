@@ -4,6 +4,12 @@ namespace ssimpson\opensslca;
 
 use Yii;
 use yii\base\Component;
+use yii\validators\BooleanValidator;
+
+// PHP does not supply anything to do CRL's so we had to pull in phpseclib
+$vendorDir = dirname(dirname(dirname(__FILE__)));
+require($vendorDir . "/phpseclib/phpseclib/phpseclib/File/X509.php");
+require($vendorDir . "/phpseclib/phpseclib/phpseclib/Crypt/RSA.php");
 
 /**
  * This module should give you all the low level functions run a simple CA.
@@ -41,21 +47,64 @@ class Opensslca extends Component
      */
     public $ca_cn;
 
+    /**
+     * from config
+     * Remake the CRL when revoking a certificate.
+     * @var bool
+     */
+    public $crlWhenRevoke;
+
+    /**
+     * from config
+     * Time for the CRL expiration. Should be relative
+     * @var string
+     */
+    public $crlExpiration;
 
     public $caKeyFile;
 
-
     public $caCertFile;
 
+    public $crlFile;
 
     public $serialFile;
 
-
     public $caKey;
-
 
     public $caCert;
 
+    private $phpseclibPrivateKey;
+
+    public static $crlStates = array('revoke'=>'Revoked', 'hold'=>'Hold');
+
+    public static $crlReasons = array(0=>'unspecified', 1=>'keyCompromise',
+        2=>'CACompromise', 3=>'affiliationChanged', 4=>'superseded',
+        5=>'cessationOfOperation',6=>'certificateHold',8=>'removeFromCRL',
+        9=>'privilegeWithdrawn',10=>'AACompromise');
+
+    /**
+     *
+     * @var array [cert_index] = ['state'=>$crlStates[?],  'reason'=>$crlReasons[], 'revokedDate'=>date]
+     */
+    private $crlSource = false;
+
+    /**
+     *
+     * @var mixed false or array [cert_index] = ['issueDate'=>'', 'subject'=>'']
+     */
+    private $certSource = false;
+
+    /**
+     * The Local Time Zone, all functions here use GMT, but we don't want to change what is displayed to the user
+     * @var string
+     */
+    private $localTz;
+
+
+    public function init()
+    {
+        $this->localTz = date_default_timezone_get();
+    }
 
     public function generateCetificateAuthority($force = false)
     {
@@ -118,17 +167,156 @@ class Opensslca extends Component
         return true;
     }
 
-
-
-    public function generateCertificateRevocationList()
+    /**
+     * use OpenSSL here
+     *
+     * https://www.openssl.org/docs/apps/ca.html
+     * http://www.phildev.net/ssl/creating_ca.html
+     * https://jamielinux.com/docs/openssl-certificate-authority/sign-server-and-client-certificates.html
+     * http://pki-tutorial.readthedocs.org/en/latest/simple/#create-crl
+     * @param string $endDate
+     */
+    public function generateCertificateRevocationList($daysCrlValid=null)
     {
+        $this->updateIndexTxt();
 
+        $cwd = $this->getCaDir();
+
+        $descriptorspec = array(
+            0 => array("pipe", "r"),  // stdin is a pipe that the child will read from
+            1 => array("pipe", "w"),  // stdout is a pipe that the child will write to
+            2 => array("pipe", "a")  // stderr is a file to write to
+        );
+
+        if (is_null($daysCrlValid) or inval($daysCrlValid) == 0) {
+            $daysCrlValid = 30;
+        } else {
+            $daysCrlValid = intval($daysCrlValid);
+        }
+
+        $crlFile = escapeshellarg($this->getCrlFile());
+        $keyFile = escapeshellarg($this->getCaKeyFile());
+        $certFile = escapeshellarg($this->getCaCertFile());
+        $confFile = escapeshellarg($this->getSslConfig());
+        // generate CRL, needs cakey.pem password if cakey.pem has one
+        $command = "openssl ca -gencrl -crldays $daysCrlValid -config $confFile -out $crlFile ".
+            "-keyfile $keyFile -cert $certFile";
+
+        $pipes = [];
+
+        $env = [];
+
+        $process = proc_open($command, $descriptorspec, $pipes, $cwd, $env);
+        if (is_resource($process)) {
+            echo stream_get_contents($pipes[1]);
+
+            $written = fwrite($pipes[0], $this->password);
+
+            echo stream_get_contents($pipes[1]);
+
+            stream_set_blocking($pipes[2], 0);
+            if ($err = stream_get_contents($pipes[2]))
+            {
+                echo $err."\n";
+                \Yii::error('Process could not be started [' . $err . ']', 'Opensslca');
+            }
+
+            fclose($pipes[0]);
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            $return_value = proc_close($process);
+        }
+
+        // view & verify CRL
+        //$command = "openssl crl -CAfile cacert.pem -in crl.pem -noout -text";
+        // convert from PEM to DER
+        //$command = "openssl crl -inform PEM -in crl.pem -outform DER -out crl.der";
+
+        return "done";
+    }
+
+    /**
+     * BROKEN ... really wish I could get this to work
+     * http://phpseclib.sourceforge.net/x509/crl.html
+     * https://github.com/phpseclib/phpseclib/issues/131
+     *
+     * @return Ambigous <Mixed, boolean, multitype:>
+     */
+    public function generateCertificateRevocationListUsingPhpSecLib()
+    {
+        $privKey= new \Crypt_RSA();
+        if ($this->password) {
+            $privKey->setPassword($this->password);
+        }
+        $keyFile = file_get_contents($this->getCaKeyFile());
+        $privKey->loadKey($keyFile);
+
+        $issuer = new \File_X509();
+        $caCertString = file_get_contents($this->getCaCertFile());
+
+        $issuer->loadX509($caCertString);
+
+        //print_r($issuer->getSubjectDN());
+
+        $issuer->setPrivateKey($privKey);
+
+        $this->loadCrlSource();
+
+        $crl = new \File_X509();
+        $crl->loadCA($caCertString);
+
+        $crl->loadCRL($crl->saveCRL($crl->signCRL($issuer, null)));
+
+        //phpseclib has this code commented out, but may use it in the future...
+        $crl->setSerialNumber($this->getNextCrlSerial());
+
+        $worker = new \File_X509();
+        $worker->loadCA($caCertString);
+
+        $crl->setEndDate('+ 30 days');
+        $worker->setEndDate('+ 30 days');
+
+        $foo = $crl->signatureSubject ;
+        foreach($this->crlSource as $id=>$value) {
+            $crl->revoke($id,$value['date']);
+
+        }
+
+        $result = $worker->signCRL($issuer, $crl); //, 'sha256WithRSAEncryption');
+
+        $text = $crl->saveCRL($result);
+
+        return $text;
     }
 
 
-    public function revokeCertificate($cert)
+    public function revokeCertificate($serialArray, $reason=0, $state='revoke', $date=null)
     {
+        $this->loadCrlSource();
 
+        if((! array_key_exists($reason, $this::$crlReasons)) || (! array_key_exists($state, $this::$crlStates))) {
+            return false;
+        }
+
+        if (array_key_exists($sn, $this->crlSource) == false) {
+            if (is_null($date)) {
+                $date = date('D, d M Y H:i:s O');
+            } else {
+                $date = date('D, d M Y H:i:s O', strtotime($date));
+            }
+            foreach ($serialArray as $sn) {
+                $this->crlSource[$sn]=['state'=>$state,'reason'=>$reason,'date'=>$date];
+            }
+        }
+        if ($this->saveCrlSource()) {
+            if ($this->crlWhenRevoke) {
+                $this->generateCertificateRevocationList();
+            }
+            return true;
+        } else {
+            return false;
+        }
     }
 
 
@@ -226,7 +414,8 @@ class Opensslca extends Component
 
     public function getCaDir()
     {
-        return str_replace('@app', \Yii::$app->basePath, $this->ca_dir);
+        // realpath is required for proc_open in $this->generateCertificateRevocationList()
+        return realpath(str_replace('@app', \Yii::$app->basePath, $this->ca_dir));
     }
 
     public function getCaKeyFile()
@@ -253,6 +442,22 @@ class Opensslca extends Component
         return $this->serialFile;
     }
 
+    public function getCrlSerialFile()
+    {
+        if (!isset($this->serialFile)) {
+            $this->serialFile = $this->getCaDir() . "/crl_serial";
+        }
+        return $this->serialFile;
+    }
+
+    public function getCrlFile()
+    {
+        if (!isset($this->serialFile)) {
+            $this->serialFile = $this->getCaDir() . "/crl.pem";
+        }
+        return $this->serialFile;
+    }
+
     public function getSslConfig()
     {
         if (file_exists($this->getCaDir() . "/openssl.cnf")) {
@@ -266,6 +471,17 @@ class Opensslca extends Component
         $sn = (int) file_get_contents($this->getSerialFile());
         $sn++;
         if (! file_put_contents($this->getSerialFile(), $sn, LOCK_EX)) {
+            \Yii::error('Unable to write serial file.','opensslca');
+            return false;
+        }
+        return $sn;
+    }
+
+    public function getNextCrlSerial()
+    {
+        $sn = (int) @file_get_contents($this->getCrlSerialFile());
+        $sn++;
+        if (! file_put_contents($this->getCrlSerialFile(), $sn, LOCK_EX)) {
             \Yii::error('Unable to write serial file.','opensslca');
             return false;
         }
@@ -311,16 +527,153 @@ class Opensslca extends Component
     }
 
 
-    public function getCertSubject($file)
+    public function getCertInfo($file)
     {
         if (
             (file_exists($file)) &&
             ($cert = openssl_x509_read("file://".$file)) &&
             ($fields = openssl_x509_parse($cert))
         ) {
-            return $fields['name'];
+            return $fields;
         } else {
             return "*** unable to get subect from file ***";
         }
     }
+
+
+    /**
+     * This could be a lot more complicated
+     * ['id'=>cert_index, 'state'=>$crlStates[?],  'reason'=>$crlReasons[], 'revokedDate'=>date]
+     */
+    public function loadCrlSource()
+    {
+        date_default_timezone_set('UTC');
+        $this->crlSource = [];
+        $crlSource = $this->getCaDir() . "/crl_source";
+        if (($handle = @fopen($crlSource, "r")) !== FALSE) {
+            while (($data = fgetcsv($handle)) !== FALSE) {
+                $this->crlSource[$data[0]] = [
+                    'state'  => $data[1],
+                    'reason' => $data[2],
+                    'date'   => $data[3],
+                ];
+            }
+            fclose($handle);
+        }
+        date_default_timezone_set($this->localTz);
+    }
+
+
+    /**
+     * [cert_index] = ['issueDate'=>'', 'name'=>'']
+     * might cache in a csv file: cert_index,issueDate,subject
+     */
+    public function loadCertSource()
+    {
+        date_default_timezone_set('UTC');
+
+        $this->certSource = [];
+        foreach (glob($this->getCaDir() . "/certs/*") as $certFile) {
+            $cert = $this->getCertInfo($certFile);
+            if ($cert) {
+                $this->certSource[basename($certFile)] = ['name' => $cert['name'], 'expireDate' => $cert['validTo']];
+            } else {
+                \Yii::error("Cert source error with: $certFile", 'Opensslca::loadCertSource');
+            }
+        }
+
+        date_default_timezone_set($this->localTz);
+    }
+
+    public function saveCrlSource()
+    {
+        $crlSource = $this->getCaDir() . "/crl_source";
+
+        if (!$this->crlSource) { return false; }
+        date_default_timezone_set('UTC');
+
+        try {
+            $tmpfname = tempnam($this->getCaDir(), "tmpcrl_");
+            if (($handle = fopen($tmpfname, "w")) !== FALSE) {
+                foreach ($this->crlSource as $id=>$v) {
+                    $fields=[$id, $v['state'], $v['reason'], $v['date']];
+                    fputcsv($handle, $fields);
+                }
+                fclose($handle);
+                if(!rename($tmpfname,$crlSource)) {
+                    \Yii::error("CRL Source not updated. Could not rename: $tmpfname to: $crlSource", 'Opensslca::saveCrlSource');
+                }
+            } else {
+                \Yii::error("CRL Source not updated. Could not open: $tmpfname", 'Opensslca::saveCrlSource');
+            }
+        } catch (Exception $e) {
+            \Yii::error("Exception: ". $e, 'Opensslca');
+            date_default_timezone_set($this->localTz);
+            return false;
+        }
+        date_default_timezone_set($this->localTz);
+        return true;
+    }
+
+    public function updateIndexTxt()
+    {
+        date_default_timezone_set('UTC');
+        $this->loadCertSource();
+        $this->loadCrlSource();
+
+        $output = [];
+        foreach ($this->certSource as $id => $cert) {
+            if (array_key_exists($id, $this->crlSource)) {
+                $status = "R";
+                if (array_key_exists($this->crlSource[$id]['reason'],$this::$crlReasons)) {
+                    $revokedReason = $this::$crlReasons[$this->crlSource[$id]['reason']];
+                } else {
+                    $revokedReason = "";
+                }
+                $revokedDate = date("ymdHis\Z",strtotime($this->crlSource[$id]['date']));
+                if ($revokedReason != '') {
+                    $revokedDate .= "," . $revokedReason;
+                }
+
+            } else {
+                $status = "V";
+                $revokedReason = "";
+                $revokedDate = "";
+            }
+            $output[] = $status . "\t" . $cert['expireDate']  . "\t" . $revokedDate . $revokedReason . "\t" . $id . "\tunknown\t" . $cert['name'] . "\n";
+        }
+
+        $indexFile = $this->getCaDir() . "/index.txt";
+        try {
+            $tmpfname = tempnam($this->getCaDir(), "tmpindex_");
+            if (($handle = fopen($tmpfname, "w")) !== FALSE) {
+                foreach ($output as $line) {
+                    fwrite($handle, $line);
+                }
+                fclose($handle);
+                if(!rename($tmpfname,$indexFile)) {
+                    \Yii::error("index.txt not updated. Could not rename: $tmpfname to: $indexFile", 'Opensslca::updateIndexTxt');
+                }
+            } else {
+                \Yii::error("index.txt not updated. Could not open: $tmpfname", 'Opensslca::updateIndexTxt');
+            }
+        } catch (Exception $e) {
+            \Yii::error("Exception: ". $e, 'Opensslca::updateIndexTxt');
+            date_default_timezone_set($this->localTz);
+            return false;
+        }
+        date_default_timezone_set($this->localTz);
+        return true;
+
+
+        /*
+         * [ssimpson@claw openssl]$ cat -A index.txt
+        V^I160601184904Z^I^I1001^Iunknown^I/C=XX/O=Default Company Ltd/CN=CA$
+        R^I160601191053Z^I150602191418Z^I1002^Iunknown^I/C=XX/ST=Default Province/O=Default Company Ltd/CN=foo$
+        R^I160601191115Z^I150602191805Z,superseded^I1003^Iunknown^I/C=XX/ST=Default Province/O=Default Company Ltd/CN=bar$
+        */
+        date_default_timezone_set($this->localTz);
+    }
+
+
 }
