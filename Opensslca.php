@@ -56,6 +56,13 @@ class Opensslca extends Component
      */
     public $crlValidDays;
 
+    /**
+     * from config
+     * Path to openssl binary
+     * @var string
+     */
+    public $caOpensslBin;
+
     public $caKeyFile;
 
     public $caCertFile;
@@ -169,10 +176,12 @@ class Opensslca extends Component
 
         $cwd = $this->getCaDir();
 
+        $tempFile = tempnam("/tmp", "ca_");
+
         $descriptorspec = array(
             0 => array("pipe", "r"),  // stdin is a pipe that the child will read from
             1 => array("pipe", "w"),  // stdout is a pipe that the child will write to
-            2 => array("pipe", "a")  // stderr is a file to write to
+            2 => array("file", $tempFile, "w")   // stderr is a file to write to
         );
 
         if (is_null($daysCrlValid) or inval($daysCrlValid) == 0) {
@@ -186,8 +195,14 @@ class Opensslca extends Component
         $certFile = escapeshellarg($this->getCaCertFile());
         $confFile = escapeshellarg($this->getSslConfig());
         // generate CRL, needs cakey.pem password if cakey.pem has one
-        $command = "openssl ca -gencrl -crldays $daysCrlValid -config $confFile -out $crlFile ".
-            "-keyfile $keyFile -cert $certFile";
+
+        $bin = 'openssl';
+        if ($this->caOpensslBin != '') {
+            $bin = escapeshellcmd($this->caOpensslBin);
+        }
+
+        $command = "$bin ca -gencrl -crldays $daysCrlValid -config $confFile -out $crlFile ".
+            "-keyfile $keyFile -cert $certFile  -passin stdin";
 
         $pipes = [];
 
@@ -195,26 +210,31 @@ class Opensslca extends Component
 
         $process = proc_open($command, $descriptorspec, $pipes, $cwd, $env);
         if (is_resource($process)) {
-            $foo = stream_get_contents($pipes[1]); // this will be a password promt
-
             $written = fwrite($pipes[0], $this->password);
+            fclose($pipes[0]);
 
-            \Yii::warning(stream_get_contents($pipes[1]), 'Opensslca');
-
-            stream_set_blocking($pipes[2], 0);
-            if ($err = stream_get_contents($pipes[2]))
-            {
-                \Yii::error('Process could not be started [' . $err . ']', 'Opensslca');
+            $stdout = stream_get_contents($pipes[1]);
+            if ($stdout && $stdout != '') {
+                \Yii::warning($stdout, 'Opensslca');
             }
 
-            fclose($pipes[0]);
             fclose($pipes[1]);
+
             fclose($pipes[2]);
+
+            $stdError = file_get_contents($tempFile);
+            if ($stdError && $stdError != '') {
+                \Yii::error('Process could not be started [' . $stdError . ']', 'Opensslca');
+            }
 
             $return_value = proc_close($process);
         }
 
-        return "done";
+        if (file_exists($tempFile)) {
+            unlink($tempFile);
+        }
+
+        return $stdout . ":" . $stdError . ":" . $return_value;
     }
 
     public function revokeCertificate($serialArray, $reason=0, $state='revoke', $date=null)
@@ -386,10 +406,10 @@ class Opensslca extends Component
 
     public function getSslConfig()
     {
-        if (file_exists($this->getCaDir() . "/openssl.cnf")) {
-            return $this->getCaDir() . "/openssl.cnf";
+        if (file_exists($this->getCaDir() . "/openssl.conf")) {
+            return $this->getCaDir() . "/openssl.conf";
         }
-        return dirname(__FILE__) . "/openssl.cnf";
+        return dirname(__FILE__) . "/openssl.conf";
     }
 
     public function getNextSerial()
