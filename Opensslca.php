@@ -174,6 +174,8 @@ class Opensslca extends Component
     {
         $this->updateIndexTxt();
 
+        $this->createDefaultFiles();
+
         $cwd = $this->getCaDir();
 
         $tempFile = tempnam("/tmp", "ca_");
@@ -234,7 +236,7 @@ class Opensslca extends Component
             unlink($tempFile);
         }
 
-        return $stdout . ":" . $stdError . ":" . $return_value;
+        return $return_value . ":" . trim($stdout) . ":" . trim($stdError);
     }
 
     public function revokeCertificate($serialArray, $reason=0, $state='revoke', $date=null)
@@ -391,7 +393,7 @@ class Opensslca extends Component
     public function getCrlSerialFile()
     {
         if (!isset($this->serialFile)) {
-            $this->serialFile = $this->getCaDir() . "/crl_serial";
+            $this->serialFile = $this->getCaDir() . "/crlnumber";
         }
         return $this->serialFile;
     }
@@ -607,9 +609,20 @@ class Opensslca extends Component
             date_default_timezone_set($this->localTz);
             return false;
         }
+
+
         date_default_timezone_set($this->localTz);
         return true;
     }
 
+    private function createDefaultFiles()
+    {
+        //openssl needs this file...
+        touch($this->getCaDir() . "/index.txt.attr");
 
+        $crlnumber = $this->getCaDir() . "/crlnumber";
+        if (file_exists($crlnumber) == false) {
+            file_put_contents($crlnumber, "1000");
+        }
+    }
 }
