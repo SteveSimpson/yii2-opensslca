@@ -583,10 +583,9 @@ class Opensslca extends Component
 
             } else {
                 $status = "V";
-                $revokedReason = "";
                 $revokedDate = "";
             }
-            $output[] = $status . "\t" . $cert['expireDate']  . "\t" . $revokedDate . $revokedReason . "\t" . $id . "\tunknown\t" . $cert['name'] . "\n";
+            $output[] = $status . "\t" . $cert['expireDate']  . "\t" . $revokedDate . "\t" . $id . "\tunknown\t" . $cert['name'] . "\n";
         }
 
         $indexFile = $this->getCaDir() . "/index.txt";
