@@ -220,7 +220,7 @@ class Opensslca extends Component
 
             fclose($pipes[1]);
 
-            fclose($pipes[2]);
+            //fclose($pipes[2]);
 
             $stdError = file_get_contents($tempFile);
             if ($stdError && $stdError != '') {
