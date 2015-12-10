@@ -563,9 +563,24 @@ class Opensslca extends Component
         return true;
     }
 
+    public function getCert($serial)
+    {
+        $certfile = $this->getCaDir() . '/ca/certs/' . $serial;
+
+        if (file_exists($certfile)) {
+            $cert = openssl_pkey_get_private("file://$certfile" );
+        }
+
+        while (($e = openssl_error_string()) !== false) {
+            \Yii::warning($e,'Opensslca::getCaKey');
+        }
+
+        return $this->certificateToString($cert);
+    }
+
     public function getPrivateKey($serial)
     {
-        $keyfile = $this->getCaDir() . '/ca/certs/' . $serial;
+        $keyfile = $this->getCaDir() . '/ca/keys/' . $serial;
 
         if (file_exists($keyfile)) {
             $privKey = openssl_pkey_get_private("file://$keyfile" , $this->password);
@@ -575,7 +590,7 @@ class Opensslca extends Component
             \Yii::warning($e,'Opensslca::getCaKey');
         }
 
-        return privateKeyToString($privKey);
+        return $this->privateKeyToString($privKey);
     }
 
     public function updateIndexTxt()
