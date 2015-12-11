@@ -569,6 +569,8 @@ class Opensslca extends Component
 
         if (file_exists($certfile)) {
             $cert = $this->getCertInfo($certfile);
+        } else {
+            return false;
         }
 
         while (($e = openssl_error_string()) !== false) {
@@ -584,6 +586,8 @@ class Opensslca extends Component
 
         if (file_exists($keyfile)) {
             $privKey = openssl_pkey_get_private("file://$keyfile" , $this->password);
+        } else {
+            return false;
         }
 
         while (($e = openssl_error_string()) !== false) {
