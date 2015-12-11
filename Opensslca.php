@@ -565,24 +565,20 @@ class Opensslca extends Component
 
     public function getCert($serial)
     {
-        $certfile = $this->getCaDir() . '/ca/certs/' . $serial;
+        $certfile = $this->getCaDir() . '/certs/' . $serial;
 
         if (file_exists($certfile)) {
-            $cert = $this->getCertInfo($certfile);
+            $cert = file_get_contents($certfile);
         } else {
             return false;
         }
 
-        while (($e = openssl_error_string()) !== false) {
-            \Yii::warning($e,'Opensslca::getCaKey');
-        }
-
-        return $this->certificateToString($cert);
+        return $cert;
     }
 
     public function getPrivateKey($serial)
     {
-        $keyfile = $this->getCaDir() . '/ca/keys/' . $serial;
+        $keyfile = $this->getCaDir() . '/keys/' . $serial;
 
         if (file_exists($keyfile)) {
             $privKey = openssl_pkey_get_private("file://$keyfile" , $this->password);
