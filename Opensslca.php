@@ -568,7 +568,7 @@ class Opensslca extends Component
         $certfile = $this->getCaDir() . '/ca/certs/' . $serial;
 
         if (file_exists($certfile)) {
-            $cert = openssl_pkey_get_private("file://$certfile" );
+            $cert = $this->getCertInfo($certfile);
         }
 
         while (($e = openssl_error_string()) !== false) {
